@@ -34,6 +34,24 @@ jobs:
         with:
           fetch-depth: 0
           submodules: recursive
+      - name: Verify required submodule branches
+        shell: bash
+        run: |
+          set -euxo pipefail
+          check_branch() {
+            local repo="$1"
+            local wanted="$2"
+            local actual
+            actual="$(git -C "$repo" rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
+            echo "$repo branch: $actual"
+            [ "$actual" = "$wanted" ] || {
+              echo "Expected $repo on '$wanted', got '$actual'" >&2
+              exit 1
+            }
+          }
+          check_branch FEX ios-port-2607
+          check_branch wine madeira-lgpl
+          check_branch dxmt ios-port
       # ---------------------------------------------------------------
       # Apple toolchain
       # ---------------------------------------------------------------
@@ -87,18 +105,14 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-
           export PATH="$(brew --prefix rustup)/bin:$HOME/.cargo/bin:$PATH"
-
           if ! command -v rustup >/dev/null 2>&1; then
             echo "rustup not found in PATH; installing via rustup-init"
             rustup-init -y --default-toolchain stable --profile minimal
           fi
-
           rustup default stable
           rustup toolchain install stable --profile minimal
           rustup target add aarch64-apple-ios --toolchain stable
-
           rustc --version
           cargo --version
       # ---------------------------------------------------------------
@@ -671,10 +685,23 @@ jobs:
             app/Madeira/libdxmt_combined.a
           test -f app/Madeira/libdxmt_combined.a
           ls -lh app/Madeira/libdxmt_combined.a
+      - name: Check D3D12 converter dependency
+        shell: bash
+        run: |
+          set -euxo pipefail
+          CONVERTER="research/GPTK/Metal Shader Converter 4.0 beta 2.pkg"
+          if [ -f "$CONVERTER" ]; then
+            echo "Found $CONVERTER; native D3D12 build enabled."
+            echo "SKIP_D3D12=0" >> "$GITHUB_ENV"
+          else
+            echo "Missing $CONVERTER; skipping native D3D12 build in CI."
+            echo "SKIP_D3D12=1" >> "$GITHUB_ENV"
+          fi
       # ---------------------------------------------------------------
       # Native D3D12
       # ---------------------------------------------------------------
       - name: Build Madeira D3D12
+        if: ${{ env.SKIP_D3D12 != '1' }}
         shell: bash
         run: |
           set -euxo pipefail
@@ -716,27 +743,32 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          for file in \
-            app/Madeira/libgmp.a \
-            app/Madeira/libnettle.a \
-            app/Madeira/libhogweed.a \
-            app/Madeira/libgnutls.a \
-            app/Madeira/libavformat.a \
-            app/Madeira/libavcodec.a \
-            app/Madeira/libswresample.a \
-            app/Madeira/libavutil.a \
-            app/Madeira/libntdll_unix.a \
-            app/Madeira/libwin32u_unix.a \
-            app/Madeira/libwineserver.a \
-            app/Madeira/libdxmt_combined.a \
-            app/Madeira/libmadeira_rppairing.a \
-            app/Madeira/arm64ec-windows/ntdll.dll \
-            app/Madeira/arm64ec-windows/xtajit64.dll \
-            app/Madeira/arm64ec-windows/winemetal.dll \
-            app/Madeira/arm64ec-windows/d3d11.dll \
-            app/Madeira/arm64ec-windows/d3d12.dll \
-            app/Madeira/arm64ec-windows/madeira_d3d12.dll
-          do
+          files=(
+            "app/Madeira/libgmp.a"
+            "app/Madeira/libnettle.a"
+            "app/Madeira/libhogweed.a"
+            "app/Madeira/libgnutls.a"
+            "app/Madeira/libavformat.a"
+            "app/Madeira/libavcodec.a"
+            "app/Madeira/libswresample.a"
+            "app/Madeira/libavutil.a"
+            "app/Madeira/libntdll_unix.a"
+            "app/Madeira/libwin32u_unix.a"
+            "app/Madeira/libwineserver.a"
+            "app/Madeira/libdxmt_combined.a"
+            "app/Madeira/libmadeira_rppairing.a"
+            "app/Madeira/arm64ec-windows/ntdll.dll"
+            "app/Madeira/arm64ec-windows/xtajit64.dll"
+            "app/Madeira/arm64ec-windows/winemetal.dll"
+            "app/Madeira/arm64ec-windows/d3d11.dll"
+          )
+          if [ "${SKIP_D3D12:-0}" != "1" ]; then
+            files+=(
+              "app/Madeira/arm64ec-windows/d3d12.dll"
+              "app/Madeira/arm64ec-windows/madeira_d3d12.dll"
+            )
+          fi
+          for file in "${files[@]}"; do
             test -f "$file" || {
               echo "MISSING: $file"
               exit 1
